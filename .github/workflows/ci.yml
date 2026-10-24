@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.16.7
       - run: terraform -chdir=infra/terraform fmt -check -recursive
@@ -111,7 +111,7 @@ jobs:
       TF_DIR: infra/terraform/envs/dev
     steps:
       - uses: actions/checkout@v5
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.16.7
       - uses: aws-actions/configure-aws-credentials@v5
