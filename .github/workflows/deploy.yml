@@ -63,7 +63,7 @@ jobs:
       model_version: ${{ steps.bootstrap.outputs.version || steps.model.outputs.version }}
     steps:
       - uses: actions/checkout@v5
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.16.7
           terraform_wrapper: false
@@ -115,7 +115,7 @@ jobs:
       url: ${{ steps.out.outputs.api_url }}
     steps:
       - uses: actions/checkout@v5
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.16.7
           terraform_wrapper: false
