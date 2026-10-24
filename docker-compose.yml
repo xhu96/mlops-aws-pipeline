@@ -1,0 +1,72 @@
+# Local replica of the AWS setup. LocalStack stands in for S3 and CloudWatch,
+# so the full train -> gate -> export -> serve -> monitor loop runs offline.
+#   make up      start LocalStack, MLflow and the API
+#   make demo    run the whole lifecycle end to end
+name: churn
+
+x-aws-env: &aws-env
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  AWS_DEFAULT_REGION: eu-west-2
+  AWS_ENDPOINT_URL: http://localstack:4566
+  MLFLOW_S3_ENDPOINT_URL: http://localstack:4566
+  MLFLOW_DISABLE_TELEMETRY: "true"
+
+services:
+  localstack:
+    image: localstack/localstack:4.9
+    environment:
+      SERVICES: s3,cloudwatch
+    ports: ["4566:4566"]
+    volumes:
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "awslocal s3 ls s3://churn-mlflow-artifacts >/dev/null 2>&1"]
+      interval: 5s
+      retries: 30
+
+  mlflow:
+    build: { context: ., target: mlflow }
+    image: churn-mlflow:dev
+    command:
+      - --backend-store-uri=sqlite:////data/mlflow.db
+      - --artifacts-destination=s3://churn-mlflow-artifacts
+      - --allowed-hosts=mlflow:5000,localhost:5000,127.0.0.1:5000
+    environment: *aws-env
+    ports: ["5000:5000"]
+    volumes: [mlflow-data:/data]
+    user: root
+    depends_on:
+      localstack: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health')"]
+      interval: 5s
+      retries: 30
+
+  trainer:
+    build: { context: ., target: trainer }
+    image: churn-trainer:dev
+    profiles: [jobs]
+    environment:
+      <<: *aws-env
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_DIR: /out/model
+    volumes: ["./model:/out/model", "./scripts:/scripts:ro"]
+    user: root
+    depends_on:
+      mlflow: { condition: service_healthy }
+
+  api:
+    build: { context: ., target: api }
+    image: churn-api:dev
+    environment:
+      <<: *aws-env
+      CAPTURE_BUCKET: churn-capture
+      CAPTURE_BATCH_SIZE: "50"
+    ports: ["8000:8000"]
+    volumes: ["./model:/app/model:ro"]
+    depends_on:
+      localstack: { condition: service_healthy }
+
+volumes:
+  mlflow-data:
