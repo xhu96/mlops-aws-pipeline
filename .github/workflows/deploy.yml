@@ -32,7 +32,7 @@ jobs:
     if: vars.AWS_ACCOUNT_ID != ''
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/churn-github-ci
@@ -62,7 +62,7 @@ jobs:
     outputs:
       model_version: ${{ steps.bootstrap.outputs.version || steps.model.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.16.7
@@ -114,7 +114,7 @@ jobs:
       name: prod # protected: requires a reviewer's approval in GitHub
       url: ${{ steps.out.outputs.api_url }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.16.7
