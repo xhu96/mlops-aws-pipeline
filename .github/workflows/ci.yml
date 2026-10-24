@@ -1,0 +1,137 @@
+name: CI
+
+# Runs on every PR and on main. Needs no AWS access, so it is green from the
+# first push; the terraform-plan job only runs once AWS is configured.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MLFLOW_DISABLE_TELEMETRY: "true"
+
+jobs:
+  python:
+    name: Lint and test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements/dev.txt
+      - run: pip install -r requirements/dev.txt && pip install --no-deps -e .
+      - run: ruff check . && ruff format --check .
+      - run: pytest --cov-report=xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+
+  images:
+    name: Build, scan and smoke-test images
+    runs-on: ubuntu-24.04
+    needs: python
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Build images
+        run: |
+          for target in api trainer mlflow; do
+            docker buildx build --load --target "$target" \
+              --cache-from "type=gha,scope=$target" --cache-to "type=gha,mode=max,scope=$target" \
+              --build-arg GIT_SHA=${{ github.sha }} -t "churn-$target:ci" .
+          done
+      - name: Train a model inside the trainer image
+        run: |
+          mkdir -p model && chmod 777 model
+          docker run --rm -v "$PWD/model:/out" -e MODEL_DIR=/out -e N_SAMPLES=5000 \
+            -e MLFLOW_TRACKING_URI=sqlite:////tmp/mlflow.db --entrypoint sh churn-trainer:ci \
+            -c "python -m churn.pipeline train && python -m churn.pipeline gate && python -m churn.pipeline export"
+      - name: Smoke-test the API image
+        run: |
+          docker run -d --name api -p 8000:8000 -v "$PWD/model:/app/model:ro" churn-api:ci
+          for _ in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 1; done
+          curl -sf localhost:8000/health | tee /dev/stderr | grep -q '"status":"ok"'
+          curl -sf -X POST localhost:8000/predict -H 'Content-Type: application/json' -d '{"customers":[{"tenure_months":2,"monthly_charges":95,"support_tickets":4,"contract_type":"month-to-month","internet_service":"fiber","payment_method":"electronic-check"}]}' | tee /dev/stderr | grep -q churn_probability
+          test "$(docker inspect -f '{{.State.Health.Status}}' api)" != "unhealthy"
+          test "$(docker inspect -f '{{.Config.User}}' api)" = "app"
+      - name: Show API logs
+        if: failure()
+        run: docker logs api || true
+      - name: Scan images for HIGH/CRITICAL vulnerabilities
+        run: |
+          for target in api trainer; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 image \
+              --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress \
+              "churn-$target:ci"
+          done
+
+  terraform:
+    name: Terraform fmt, validate, test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.7
+      - run: terraform -chdir=infra/terraform fmt -check -recursive
+      - name: Validate root stacks
+        run: |
+          for dir in bootstrap global envs/dev envs/prod; do
+            terraform -chdir=infra/terraform/$dir init -backend=false -input=false
+            terraform -chdir=infra/terraform/$dir validate
+          done
+      - name: Module tests (mocked AWS provider)
+        run: |
+          for mod in stack mlflow api_service storage; do
+            terraform -chdir=infra/terraform/modules/$mod init -backend=false -input=false
+            terraform -chdir=infra/terraform/modules/$mod test
+          done
+
+  terraform-plan:
+    name: Terraform plan (dev)
+    if: github.event_name == 'pull_request' && vars.AWS_ACCOUNT_ID != ''
+    needs: terraform
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write # OIDC
+      pull-requests: write
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_DIR: infra/terraform/envs/dev
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.7
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/churn-github-ci
+          aws-region: eu-west-2
+      - name: Plan
+        id: plan
+        run: |
+          terraform -chdir="$TF_DIR" init -input=false -backend-config="bucket=churn-tfstate-${{ vars.AWS_ACCOUNT_ID }}"
+          version=$(aws s3 cp "s3://churn-dev-models-${{ vars.AWS_ACCOUNT_ID }}/bundles/champion.json" - 2>/dev/null | jq -r .version || echo none)
+          terraform -chdir="$TF_DIR" plan -input=false -no-color -lock=false \
+            -var "ecr_registry=${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.eu-west-2.amazonaws.com" \
+            -var "api_image_tag=${{ github.sha }}" -var "trainer_image_tag=${{ github.sha }}" \
+            -var "mlflow_image_tag=${{ github.sha }}" -var "model_version=$version" > plan.txt
+          tail -n 1 plan.txt
+      - name: Comment plan on the PR
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const plan = require('fs').readFileSync('plan.txt', 'utf8');
+            const body = `#### Terraform plan (dev)\n<details><summary>${plan.trim().split('\n').pop()}</summary>\n\n\`\`\`\n${plan.slice(-60000)}\n\`\`\`\n</details>`;
+            await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });

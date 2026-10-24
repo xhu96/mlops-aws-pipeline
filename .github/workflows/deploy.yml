@@ -1,0 +1,142 @@
+name: Deploy
+
+# main -> build images once -> dev (train if needed, deploy, smoke test)
+#      -> prod (manual approval, promote the same images + the same model bundle)
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "**.md"]
+  workflow_dispatch:
+    inputs:
+      model_version:
+        description: "Serve this bundle version instead of the current champion (rollback)"
+        required: false
+
+permissions:
+  contents: read
+  id-token: write # OIDC to AWS
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false # never interrupt a terraform apply
+
+env:
+  AWS_REGION: eu-west-2
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+  IMAGE_TAG: ${{ github.sha }}
+  ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+
+jobs:
+  images:
+    name: Build and push images
+    if: vars.AWS_ACCOUNT_ID != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/churn-github-ci
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push (tags are immutable, so skip ones that exist)
+        run: |
+          for target in api trainer mlflow; do
+            repo="churn-${target}"
+            if aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
+              echo "$repo:$IMAGE_TAG already pushed"; continue
+            fi
+            docker buildx build --push --target "$target" --build-arg GIT_SHA="$IMAGE_TAG" \
+              --cache-from "type=gha,scope=$target" --cache-to "type=gha,mode=max,scope=$target" \
+              -t "${{ steps.ecr.outputs.registry }}/$repo:$IMAGE_TAG" .
+          done
+
+  dev:
+    name: Deploy to dev
+    needs: images
+    runs-on: ubuntu-24.04
+    environment:
+      name: dev
+      url: ${{ steps.out.outputs.api_url }}
+    outputs:
+      model_version: ${{ steps.bootstrap.outputs.version || steps.model.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.7
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/churn-github-deploy-dev
+          aws-region: ${{ env.AWS_REGION }}
+      - run: scripts/ci/tf.sh dev init
+      - name: Resolve model version
+        id: model
+        run: |
+          pointer="s3://churn-dev-models-${AWS_ACCOUNT_ID}/bundles/champion.json"
+          version="${{ inputs.model_version }}"
+          if [ -z "$version" ]; then
+            version=$(aws s3 cp "$pointer" - 2>/dev/null | jq -r .version || true)
+          fi
+          echo "version=${version:-none}" >> "$GITHUB_OUTPUT"
+      - name: Apply infrastructure
+        run: MODEL_VERSION=${{ steps.model.outputs.version }} scripts/ci/tf.sh dev apply
+      - name: First deploy only - train the first model
+        if: steps.model.outputs.version == 'none'
+        id: bootstrap
+        run: |
+          scripts/ci/run-job.sh dev retrain
+          version=$(aws s3 cp "s3://churn-dev-models-${AWS_ACCOUNT_ID}/bundles/champion.json" - | jq -r .version)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          MODEL_VERSION=$version scripts/ci/tf.sh dev apply
+      - id: out
+        run: echo "api_url=$(scripts/ci/tf.sh dev output api_url)" >> "$GITHUB_OUTPUT"
+      - name: Wait for a stable rollout
+        run: aws ecs wait services-stable --cluster churn-dev --services api
+      - name: Smoke test
+        run: scripts/ci/smoke-test.sh "${{ steps.out.outputs.api_url }}" "${{ steps.bootstrap.outputs.version || steps.model.outputs.version }}"
+      - name: Summary
+        run: |
+          {
+            echo "### dev deployed"
+            echo "- image: \`${IMAGE_TAG::7}\`"
+            echo "- model: v${{ steps.bootstrap.outputs.version || steps.model.outputs.version }}"
+            echo "- url: ${{ steps.out.outputs.api_url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  prod:
+    name: Promote to prod
+    needs: dev
+    runs-on: ubuntu-24.04
+    environment:
+      name: prod # protected: requires a reviewer's approval in GitHub
+      url: ${{ steps.out.outputs.api_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.7
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/churn-github-deploy-prod
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Promote the model bundle tested in dev
+        env:
+          VERSION: ${{ needs.dev.outputs.model_version }}
+        run: |
+          src="s3://churn-dev-models-${AWS_ACCOUNT_ID}/bundles"
+          dst="s3://churn-prod-models-${AWS_ACCOUNT_ID}/bundles"
+          aws s3 sync "$src/v$VERSION/" "$dst/v$VERSION/"
+          echo "{\"version\": \"$VERSION\"}" | aws s3 cp - "$dst/champion.json" --content-type application/json
+      - run: scripts/ci/tf.sh prod init
+      - name: Apply infrastructure
+        run: MODEL_VERSION=${{ needs.dev.outputs.model_version }} scripts/ci/tf.sh prod apply
+      - id: out
+        run: echo "api_url=$(scripts/ci/tf.sh prod output api_url)" >> "$GITHUB_OUTPUT"
+      - name: Wait for a stable rollout
+        run: aws ecs wait services-stable --cluster churn-prod --services api
+      - name: Smoke test
+        run: scripts/ci/smoke-test.sh "${{ steps.out.outputs.api_url }}" "${{ needs.dev.outputs.model_version }}"

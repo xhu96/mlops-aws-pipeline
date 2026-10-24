@@ -1,0 +1,54 @@
+name: Retrain
+
+# Weekly (or on demand): retrain in dev on AWS. The job trains, runs the quality
+# gate and, only if the gate passes, publishes a new champion bundle. A new
+# champion then goes through the normal deploy pipeline (dev -> approval -> prod).
+on:
+  schedule:
+    - cron: "0 3 * * 1" # Mondays 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  actions: write # to dispatch the deploy workflow
+
+concurrency:
+  group: retrain
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-2
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+
+jobs:
+  retrain:
+    if: vars.AWS_ACCOUNT_ID != ''
+    runs-on: ubuntu-24.04
+    environment: dev
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.7
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/churn-github-deploy-dev
+          aws-region: ${{ env.AWS_REGION }}
+      - run: scripts/ci/tf.sh dev init
+      - name: Champion before
+        id: before
+        run: echo "version=$(aws s3 cp "s3://churn-dev-models-${AWS_ACCOUNT_ID}/bundles/champion.json" - | jq -r .version)" >> "$GITHUB_OUTPUT"
+      - name: Train, gate, export (ECS task)
+        run: scripts/ci/run-job.sh dev retrain
+      - name: Champion after
+        id: after
+        run: echo "version=$(aws s3 cp "s3://churn-dev-models-${AWS_ACCOUNT_ID}/bundles/champion.json" - | jq -r .version)" >> "$GITHUB_OUTPUT"
+      - name: Deploy the new champion
+        if: steps.after.outputs.version != steps.before.outputs.version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "New champion v${{ steps.after.outputs.version }} (was v${{ steps.before.outputs.version }})" >> "$GITHUB_STEP_SUMMARY"
+          gh workflow run deploy.yml --ref main
