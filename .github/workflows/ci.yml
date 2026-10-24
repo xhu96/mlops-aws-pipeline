@@ -22,7 +22,7 @@ jobs:
     name: Lint and test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: python
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - name: Build images
         run: |
@@ -79,7 +79,7 @@ jobs:
     name: Terraform fmt, validate, test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.16.7
@@ -110,7 +110,7 @@ jobs:
       TF_IN_AUTOMATION: "true"
       TF_DIR: infra/terraform/envs/dev
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.16.7
