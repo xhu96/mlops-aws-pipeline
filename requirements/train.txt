@@ -10,7 +10,7 @@ annotated-doc==0.0.5
     # via fastapi
 annotated-types==0.8.0
     # via pydantic
-anyio==4.15.1
+anyio==4.16.0
     # via
     #   mlflow-skinny
     #   starlette
@@ -18,13 +18,13 @@ attrs==26.1.0
     # via aiohttp
 blinker==1.9.0
     # via flask
-boto3==1.43.118
+boto3==1.43.123
     # via churn (pyproject.toml)
-botocore==1.43.118
+botocore==1.43.123
     # via
     #   boto3
     #   s3transfer
-cachetools==7.2.4
+cachetools==7.2.8
     # via
     #   mlflow-skinny
     #   mlflow-tracing
@@ -53,7 +53,7 @@ cryptography==50.0.2
     #   mlflow
 cycler==0.12.1
     # via matplotlib
-databricks-sdk==0.157.0
+databricks-sdk==0.161.0
     # via
     #   mlflow-skinny
     #   mlflow-tracing
@@ -67,7 +67,7 @@ flask==3.1.3
     #   mlflow
 flask-cors==6.0.5
     # via mlflow
-fonttools==4.67.0
+fonttools==4.68.0
     # via matplotlib
 frozenlist==1.8.0
     # via
@@ -77,11 +77,11 @@ gitdb==4.0.12
     # via gitpython
 gitpython==3.2.1
     # via mlflow-skinny
-google-auth==2.62.0
+google-auth==2.62.1
     # via databricks-sdk
 graphene==3.4.3
     # via mlflow
-graphql-core==3.2.13
+graphql-core==3.3.1
     # via
     #   graphene
     #   graphql-relay
@@ -91,14 +91,14 @@ gunicorn==26.2.0
     # via mlflow
 h11==0.16.0
     # via uvicorn
-huey==3.5.3
+huey==3.5.4
     # via mlflow
 idna==3.20
     # via
     #   anyio
     #   requests
     #   yarl
-importlib-metadata==9.1.0
+importlib-metadata==10.1.0
     # via mlflow-skinny
 itsdangerous==2.2.0
     # via flask
@@ -124,17 +124,17 @@ markupsafe==3.0.4
     #   werkzeug
 matplotlib==3.11.2
     # via mlflow
-mlflow==3.17.2
+mlflow==3.18.0
     # via churn (pyproject.toml)
-mlflow-skinny==3.17.2
+mlflow-skinny==3.18.0
     # via mlflow
-mlflow-tracing==3.17.2
+mlflow-tracing==3.18.0
     # via mlflow
-multidict==7.2.0
+multidict==7.2.1
     # via
     #   aiohttp
     #   yarl
-narwhals==2.27.1
+narwhals==2.28.0
     # via scikit-learn
 numpy==2.5.4
     # via
@@ -146,22 +146,22 @@ numpy==2.5.4
     #   scikit-learn
     #   scipy
     #   skops
-opentelemetry-api==1.45.1
+opentelemetry-api==1.45.2
     # via
     #   fastapi
     #   mlflow-skinny
     #   mlflow-tracing
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
-opentelemetry-proto==1.45.1
+opentelemetry-proto==1.45.2
     # via
     #   mlflow-skinny
     #   mlflow-tracing
-opentelemetry-sdk==1.45.1
+opentelemetry-sdk==1.45.2
     # via
     #   mlflow-skinny
     #   mlflow-tracing
-opentelemetry-semantic-conventions==0.66b1
+opentelemetry-semantic-conventions==0.66b2
     # via opentelemetry-sdk
 packaging==26.3
     # via
@@ -187,24 +187,24 @@ protobuf==7.36.2
     #   mlflow-skinny
     #   mlflow-tracing
     #   opentelemetry-proto
-pyarrow==25.0.1
+pyarrow==26.0.1
     # via mlflow
-pyasn1==0.6.4
+pyasn1==0.6.5
     # via pyasn1-modules
 pyasn1-modules==0.4.2
     # via google-auth
 pycparser==3.12
     # via cffi
-pydantic==2.14.1
+pydantic==2.14.2
     # via
     #   fastapi
     #   mlflow-skinny
     #   mlflow-tracing
-pydantic-core==2.50.1
+pydantic-core==2.50.2
     # via pydantic
 pyparsing==3.3.3
     # via matplotlib
-python-dateutil==2.9.0.post0
+python-dateutil==4.0.0
     # via
     #   botocore
     #   graphene
@@ -237,13 +237,13 @@ skops==0.16.0
     # via mlflow
 smmap==5.0.3
     # via gitdb
-sqlalchemy==2.1.6
+sqlalchemy==2.1.8
     # via
     #   alembic
     #   mlflow
-sqlparse==0.6.0
+sqlparse==0.6.1
     # via mlflow-skinny
-starlette==1.9.0
+starlette==1.10.0
     # via
     #   fastapi
     #   mlflow-skinny
@@ -266,7 +266,7 @@ typing-extensions==4.16.0
     #   sqlalchemy
     #   starlette
     #   typing-inspection
-typing-inspection==0.4.4
+typing-inspection==0.4.5
     # via
     #   fastapi
     #   pydantic
@@ -278,7 +278,7 @@ urllib3==2.8.0
     #   requests
 uvicorn==0.54.0
     # via mlflow-skinny
-wcwidth==0.9.3
+wcwidth==0.9.4
     # via prettytable
 werkzeug==3.1.9
     # via
